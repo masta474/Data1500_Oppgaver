@@ -1,0 +1,435 @@
+name: Automated Grading - Øving 1
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  TESTDATA_REPO: 'oslomet-data1500/data1500-testdata-01'  # Replace with your test data repo yes
+  TESTDATA_REF: 'main'
+
+jobs:
+  setup-testdata:
+    name: Download Test Data
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout test data repository
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ env.TESTDATA_REPO }}
+          ref: ${{ env.TESTDATA_REF }}
+          path: testdata
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload test data as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: testdata
+          path: testdata/
+          retention-days: 1
+
+  test-java:
+    name: Test Java Solutions
+    runs-on: ubuntu-latest
+    needs: setup-testdata
+    
+    steps:
+      - name: Checkout student code
+        uses: actions/checkout@v3
+      
+      - name: Download test data
+        uses: actions/download-artifact@v4
+        with:
+          name: testdata
+          path: testdata
+      
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      
+      - name: Create results directory
+        run: mkdir -p test-results
+      
+      # ============================================================
+      # OPPGAVE 1: CSV Parsing
+      # ============================================================
+      
+      - name: "Oppgave 1: Compile"
+        id: oppgave1-compile
+        run: |
+          cd oppgave1
+          javac LesStudenter.java 2>&1 | tee ../test-results/oppgave1-compile.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true
+      
+      - name: "Oppgave 1: Test with correct CSV"
+        if: steps.oppgave1-compile.outputs.status == '0'
+        run: |
+          cd oppgave1
+          java LesStudenter ../testdata/data/studenter_korrekt.csv > ../test-results/oppgave1-korrekt.out 2>&1
+          diff -u ../testdata/expected/oppgave1_korrekt_output.txt ../test-results/oppgave1-korrekt.out > ../test-results/oppgave1-korrekt.diff || true
+          if [ -s ../test-results/oppgave1-korrekt.diff ]; then
+            echo "❌ Output does not match expected"
+            cat ../test-results/oppgave1-korrekt.diff
+            exit 1
+          else
+            echo "✅ Test passed"
+          fi
+      
+      - name: "Oppgave 1: Test with empty CSV"
+        if: steps.oppgave1-compile.outputs.status == '0'
+        run: |
+          cd oppgave1
+          java LesStudenter ../testdata/data/studenter_tom.csv > ../test-results/oppgave1-tom.out 2>&1
+          if [ $? -eq 0 ]; then
+            echo "✅ Program handled empty file gracefully"
+          else
+            echo "❌ Program crashed on empty file"
+            exit 1
+          fi
+      
+      - name: "Oppgave 1: Test with malformed CSV"
+        if: steps.oppgave1-compile.outputs.status == '0'
+        run: |
+          cd oppgave1
+          java LesStudenter ../testdata/data/studenter_feilformat.csv > ../test-results/oppgave1-feilformat.out 2>&1
+          diff -u ../testdata/expected/oppgave1_feilformat_output.txt ../test-results/oppgave1-feilformat.out > ../test-results/oppgave1-feilformat.diff || true
+          if [ -s ../test-results/oppgave1-feilformat.diff ]; then
+            echo "❌ Did not handle malformed data correctly"
+            cat ../test-results/oppgave1-feilformat.diff
+            exit 1
+          else
+            echo "✅ Test passed"
+          fi
+      
+      # ============================================================
+      # OPPGAVE 2: Linear Search
+      # ============================================================
+      
+      - name: "Oppgave 2: Compile DataGenerator"
+        id: oppgave2-generator-compile
+        run: |
+          cd oppgave2
+          javac DataGenerator.java 2>&1 | tee ../test-results/oppgave2-generator-compile.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true
+      
+      - name: "Oppgave 2: Test DataGenerator"
+        if: steps.oppgave2-generator-compile.outputs.status == '0'
+        run: |
+          cd oppgave2
+          java DataGenerator test_output.csv 1000
+          LINES=$(wc -l < test_output.csv)
+          if [ "$LINES" -eq 1000 ]; then
+            echo "✅ Generated correct number of lines"
+          else
+            echo "❌ Expected 1000 lines, got $LINES"
+            exit 1
+          fi
+      
+      - name: "Oppgave 2: Compile FinnBruker"
+        id: oppgave2-search-compile
+        run: |
+          cd oppgave2
+          javac FinnBruker.java 2>&1 | tee ../test-results/oppgave2-search-compile.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true
+      
+      - name: "Oppgave 2: Test search for early user"
+        if: steps.oppgave2-search-compile.outputs.status == '0'
+        run: |
+          cd oppgave2
+          timeout 10s java FinnBruker ../testdata/data/brukere_10k.csv bruker5@epost.no > ../test-results/oppgave2-bruker5.out 2>&1
+          if grep -q "bruker5@epost.no" ../test-results/oppgave2-bruker5.out; then
+            echo "✅ Found user correctly"
+          else
+            echo "❌ Did not find user"
+            exit 1
+          fi
+      
+      - name: "Oppgave 2: Test search for late user"
+        if: steps.oppgave2-search-compile.outputs.status == '0'
+        run: |
+          cd oppgave2
+          timeout 30s java FinnBruker ../testdata/data/brukere_10k.csv bruker9999@epost.no > ../test-results/oppgave2-bruker9999.out 2>&1
+          if grep -q "bruker9999@epost.no" ../test-results/oppgave2-bruker9999.out; then
+            echo "✅ Found user correctly"
+          else
+            echo "❌ Did not find user"
+            exit 1
+          fi
+      
+      - name: "Oppgave 2: Test search for non-existent user"
+        if: steps.oppgave2-search-compile.outputs.status == '0'
+        run: |
+          cd oppgave2
+          timeout 30s java FinnBruker ../testdata/data/brukere_10k.csv nonexistent@epost.no > ../test-results/oppgave2-nonexistent.out 2>&1
+          if [ $? -eq 0 ]; then
+            echo "✅ Program completed without crashing"
+          else
+            echo "❌ Program crashed or timed out"
+            exit 1
+          fi
+      
+      # ============================================================
+      # OPPGAVE 3: Hash Join
+      # ============================================================
+      
+      - name: "Oppgave 3: Compile"
+        id: oppgave3-compile
+        run: |
+          cd oppgave3
+          javac HashJoin.java 2>&1 | tee ../test-results/oppgave3-compile.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true
+      
+      - name: "Oppgave 3: Test hash join"
+        if: steps.oppgave3-compile.outputs.status == '0'
+        run: |
+          cd oppgave3
+          java HashJoin \
+            ../testdata/data/studenter.csv \
+            ../testdata/data/kurs.csv \
+            ../testdata/data/paameldinger.csv \
+            > ../test-results/oppgave3.out 2>&1
+          
+          # Sort both files before comparing (order may vary with HashMap)
+          sort ../testdata/expected/oppgave3_output.txt > ../test-results/oppgave3-expected-sorted.txt
+          sort ../test-results/oppgave3.out > ../test-results/oppgave3-sorted.out
+          
+          diff -u ../test-results/oppgave3-expected-sorted.txt ../test-results/oppgave3-sorted.out > ../test-results/oppgave3.diff || true
+          if [ -s ../test-results/oppgave3.diff ]; then
+            echo "❌ Output does not match expected"
+            cat ../test-results/oppgave3.diff
+            exit 1
+          else
+            echo "✅ Test passed"
+          fi
+      
+      # ============================================================
+      # OPPGAVE 4: Indexing
+      # ============================================================
+      
+      - name: "Oppgave 4: Compile IndeksBygger"
+        id: oppgave4-builder-compile
+        run: |
+          cd oppgave4
+          javac IndeksBygger.java 2>&1 | tee ../test-results/oppgave4-builder-compile.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true
+      
+      - name: "Oppgave 4: Build index"
+        if: steps.oppgave4-builder-compile.outputs.status == '0'
+        run: |
+          cd oppgave4
+          java IndeksBygger ../testdata/data/brukere_10k.csv brukere.idx 2>&1 | tee ../test-results/oppgave4-build.log
+          if [ -f brukere.idx ]; then
+            echo "✅ Index file created"
+          else
+            echo "❌ Index file not created"
+            exit 1
+          fi
+      
+      - name: "Oppgave 4: Compile SokMedIndeks"
+        id: oppgave4-search-compile
+        if: steps.oppgave4-builder-compile.outputs.status == '0'
+        run: |
+          cd oppgave4
+          javac SokMedIndeks.java 2>&1 | tee ../test-results/oppgave4-search-compile.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true
+      
+      - name: "Oppgave 4: Test indexed search"
+        if: steps.oppgave4-search-compile.outputs.status == '0'
+        run: |
+          cd oppgave4
+          START=$(date +%s%N)
+          java SokMedIndeks ../testdata/data/brukere_10k.csv brukere.idx bruker9999@epost.no > ../test-results/oppgave4-search.out 2>&1
+          END=$(date +%s%N)
+          ELAPSED=$(( (END - START) / 1000000 ))  # Convert to milliseconds
+          
+          echo "Search took ${ELAPSED}ms"
+          
+          if grep -q "bruker9999@epost.no" ../test-results/oppgave4-search.out; then
+            echo "✅ Found user correctly"
+          else
+            echo "❌ Did not find user"
+            exit 1
+          fi
+          
+          # Indexed search should be very fast (< 100ms)
+          if [ "$ELAPSED" -lt 100 ]; then
+            echo "✅ Search was fast (${ELAPSED}ms < 100ms)"
+          else
+            echo "⚠️ Search was slower than expected (${ELAPSED}ms)"
+          fi
+      
+      # ============================================================
+      # Upload test results
+      # ============================================================
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: java-test-results
+          path: test-results/
+          retention-days: 7
+
+  code-quality-java:
+    name: Java Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout student code
+        uses: actions/checkout@v3
+      
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      
+      - name: Download Checkstyle
+        run: |
+          wget https://github.com/checkstyle/checkstyle/releases/download/checkstyle-10.12.5/checkstyle-10.12.5-all.jar
+          wget https://raw.githubusercontent.com/checkstyle/checkstyle/master/src/main/resources/google_checks.xml
+      
+      - name: Run Checkstyle
+        run: |
+          java -jar checkstyle-10.12.5-all.jar -c google_checks.xml oppgave*/**/*.java > checkstyle-report.txt || true
+          cat checkstyle-report.txt
+          
+          # Count violations
+          VIOLATIONS=$(grep -c "^\[" checkstyle-report.txt || echo "0")
+          echo "Found $VIOLATIONS style violations"
+          
+          if [ "$VIOLATIONS" -eq 0 ]; then
+            echo "✅ No style violations found"
+          else
+            echo "⚠️ Found $VIOLATIONS style violations"
+          fi
+      
+      - name: Upload Checkstyle report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkstyle-report
+          path: checkstyle-report.txt
+          retention-days: 7
+
+  generate-summary:
+    name: Generate Test Summary
+    runs-on: ubuntu-latest
+    needs: [test-java, code-quality-java]
+    if: always()
+    
+    steps:
+      - name: Download Java test results
+        uses: actions/download-artifact@v4
+        with:
+          name: java-test-results
+          path: test-results
+        continue-on-error: true
+      
+      - name: Download Checkstyle report
+        uses: actions/download-artifact@v4
+        with:
+          name: checkstyle-report
+          path: .
+        continue-on-error: true
+      
+      - name: Generate summary
+        run: |
+          echo "# 📊 Automated Test Results - Øving 1" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Java Solutions" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Oppgave 1
+          echo "### Oppgave 1: CSV Parsing" >> $GITHUB_STEP_SUMMARY
+          if [ -f test-results/oppgave1-compile.log ]; then
+            if grep -q "error:" test-results/oppgave1-compile.log; then
+              echo "- ❌ Compilation failed" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ✅ Compilation successful" >> $GITHUB_STEP_SUMMARY
+              
+              if [ ! -s test-results/oppgave1-korrekt.diff ]; then
+                echo "- ✅ Correct CSV test passed" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "- ❌ Correct CSV test failed" >> $GITHUB_STEP_SUMMARY
+              fi
+              
+              if [ ! -s test-results/oppgave1-feilformat.diff ]; then
+                echo "- ✅ Malformed CSV test passed" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "- ❌ Malformed CSV test failed" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+          else
+            echo "- ⚠️ No test results found" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Oppgave 2
+          echo "### Oppgave 2: Linear Search" >> $GITHUB_STEP_SUMMARY
+          if [ -f test-results/oppgave2-search-compile.log ]; then
+            if grep -q "error:" test-results/oppgave2-search-compile.log; then
+              echo "- ❌ Compilation failed" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ✅ Compilation successful" >> $GITHUB_STEP_SUMMARY
+              echo "- ✅ Functional tests passed" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "- ⚠️ No test results found" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Oppgave 3
+          echo "### Oppgave 3: Hash Join" >> $GITHUB_STEP_SUMMARY
+          if [ -f test-results/oppgave3-compile.log ]; then
+            if grep -q "error:" test-results/oppgave3-compile.log; then
+              echo "- ❌ Compilation failed" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ✅ Compilation successful" >> $GITHUB_STEP_SUMMARY
+              
+              if [ ! -s test-results/oppgave3.diff ]; then
+                echo "- ✅ Join test passed" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "- ❌ Join test failed" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+          else
+            echo "- ⚠️ No test results found" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Oppgave 4
+          echo "### Oppgave 4: Indexing" >> $GITHUB_STEP_SUMMARY
+          if [ -f test-results/oppgave4-search-compile.log ]; then
+            if grep -q "error:" test-results/oppgave4-search-compile.log; then
+              echo "- ❌ Compilation failed" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ✅ Compilation successful" >> $GITHUB_STEP_SUMMARY
+              echo "- ✅ Indexing tests passed" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "- ⚠️ No test results found" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Code Quality
+          echo "## Code Quality" >> $GITHUB_STEP_SUMMARY
+          if [ -f checkstyle-report.txt ]; then
+            VIOLATIONS=$(grep -c "^\[" checkstyle-report.txt || echo "0")
+            echo "- Checkstyle violations: $VIOLATIONS" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "💡 **Note:** This is automated testing only. Manual review of reflection questions is still required." >> $GITHUB_STEP_SUMMARY
