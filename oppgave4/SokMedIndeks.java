@@ -1,4 +1,3 @@
-// SokMedIndeks.java
 import java.io.*;
 import java.time.Duration;
 import java.time.Instant;
@@ -7,20 +6,14 @@ import java.util.HashMap;
 
 public class SokMedIndeks {
     
-	@SuppressWarnings("unchecked") // tar ansvar selv, hvis man vet nøyaktig hvordan indeksfilen ble generert
+	@SuppressWarnings("unchecked")
 
-    // Koden som du skal skape selv er å finne hvor i filen skal man plassere tidtaker-funksjoner (for måle ytelse med bruk av indeks):
-    // Instant start = Instant.now();
-    // Instant slutt = Instant.now();
-    // Duration dur = Duration.between(start, slutt);
-    
+
 	public static void main(String[] args) {
-        // Tar inn navn til datafil, navn til indeksfil (bygget med IndeksBygger) og søkeuttrykket
 		String dataFil = args[0];
 		String indeksFil = args[1];
 		String epostSok = args[2];
 
-		// Last indeksen fra fil (som inneholder serialiserte data man genererte med IndeksBygger)
 		Map<String, Long> indeks = new HashMap<>();
         
 		try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(indeksFil))) {
@@ -31,11 +24,15 @@ public class SokMedIndeks {
 			cnfe.printStackTrace();
 		}
 
-		
+		Duration dur = null;
 		// O(1) oppslag i indeksen
 		Long posisjon = null;
 		if (indeks != null) {
+			Instant start = Instant.now();
 			posisjon = indeks.get(epostSok);
+			Instant slutt = Instant.now();
+			dur = Duration.between(start, slutt);
+
 		}
 
 		if (posisjon != null) {
@@ -51,10 +48,7 @@ public class SokMedIndeks {
 			System.out.println("E-post ikke funnet i indeksen.");
 		}
 
-		// Skriv ut en linje til stdout (System.out i Java) på følgende format:
-        // Søket med indeks tok N nanos (M ms).
-        // Hvor N er tallet i nanosekunder og M er tallet i millisekunder.
-		System.out.println("...");
+		System.out.println("Søket med indeks tok " + dur.toNanos() + " nanos (" + dur.toMillis() +" ms).");
 
 	}
 }
